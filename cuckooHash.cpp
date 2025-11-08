@@ -190,9 +190,9 @@ int main() {
     int limit = 100;             // displacement limit, //Common practical values for the maximum path length threshold are typically in the range of 100 to 200 displacements (kicks). 
     int num_threads = 1;         // can test 1, 2, 4, 8, etc.
     int total_ops = 1000000;   // total number of operations, shoudl do 1,000,000
-    double insert_ratio = 0.10;  // 10% insert
-    double remove_ratio = 0.10;  // 10% remove
-    double contains_ratio = 0.80;// 80% contains
+    double insert_ratio = 0.30;  // 10% insert
+    double remove_ratio = 0.30;  // 10% remove
+    double contains_ratio = 0.40;// 80% contains
 
     CuckooHashSet<int> set(initial_size, limit);
     set.populate(initial_size / 2); // pre-populate 50% of table
@@ -250,6 +250,7 @@ int main() {
 }
 //command line command:
 //g++ -std=c++17 -O2 -pthread cuckooHash.cpp -o cuckoo_hash
+// cuckoo_hash
 
 
 
