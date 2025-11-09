@@ -250,7 +250,7 @@ int main() {
 }
 //command line command:
 //g++ -std=c++17 -O2 -pthread cuckooHash.cpp -o cuckoo_hash
-// cuckoo_hash
+// ./cuckoo_hash
 
 
 

@@ -70,9 +70,9 @@ private:
         int old_capacity = table_size;
         //std::lock_guard<std::mutex> global_lock(global_resize_lock);
         // Wait for all adds/deletes to finish and block new ones
-        std::cout << "\n=== ===\n" << "stuck at lock" << "\n-----------\n";
+        //std::cout << "\n=== ===\n" << "resize called" << "\n-----------\n";
         std::unique_lock<std::shared_mutex> resize_guard(resize_mutex);
-         std::cout << "\n=== ===\n" << "made it past lock" << "\n-----------\n";
+        // std::cout << "\n=== ===\n" << "made it past lock" << "\n-----------\n";
         //for (auto& l : locks0) l.lock();
         // dont need both for (auto& l : locks1) l.lock();
 
@@ -82,25 +82,27 @@ private:
             table_size *= 2;
             std::vector<std::list<T>> temp0 = std::move(table0);;
             std::vector<std::list<T>> temp1 = std::move(table1);;
-
+            //std::cout << "\n=== ===\n" << "made it past lock 1" << "\n-----------\n";
             table0.assign(table_size, std::list<T>{});
             table1.assign(table_size, std::list<T>{});
+            //std::cout << "\n=== ===\n" << "made it past lock 2" << "\n-----------\n";
             //reassign locks
             //locks0.assign(table_size, std::mutex{});
             //locks1.assign(table_size, std::mutex{});
             locks0 = std::vector<std::mutex>(table_size);
             locks1 = std::vector<std::mutex>(table_size);
-
+            //std::cout << "\n=== ===\n" << "made it past lock 3" << "\n-----------\n";
             std::uniform_int_distribution<size_t> dist;
             seed = dist(rng);
             seed1 = dist(rng);
-
+            //std::cout << "\n=== ===\n" << "made it past lock 4" << "\n-----------\n";
             for (auto& row : temp0)
                 for (auto& x : row)
-                    add(x);
+                    add_internal(x);
+            //std::cout << "\n=== ===\n" << "made it past lock 5" << "\n-----------\n";
             for (auto& row : temp1)
                 for (auto& x : row)
-                    add(x);
+                    add_internal(x);
         //} catch (...) {
         //for (auto& l : locks0) l.unlock();
           //  throw;
@@ -108,10 +110,43 @@ private:
 
         //for (auto& l : locks0) l.unlock();
         // dont need both for (auto& l : locks1) l.unlock();
-        std::cout << "\n=== ===\n" << "made it to end of resize" << "\n-----------\n";
+        //std::cout << "\n=== ===\n" << "made it to end of resize" << "\n-----------\n";
     }
 
-    
+    bool add_internal(const T& x) {
+        // NOTE: Assume resize_mutex is held exclusively by the caller (resize())
+        // and that bucket locks are free to use.
+        //acquire(x);
+        // NO resize_guard here
+        
+        int h0 = hash0(x);
+        int h1 = hash1(x);
+        //int i = -1, h = -1; 
+        //bool mustResize = false; // This must be handled by the caller (resize)
+
+        // The bucket logic remains the same as your original add() logic
+        //if (present(x)) { return false; }
+        std::list<T>& set0 = table0[h0]; 
+        std::list<T>& set1 = table1[h1]; 
+        
+        if ((int)set0.size() < THRESHOLD) { // Threshold check is implicit when re-adding , maybe set to Probe_size
+            set0.push_back(x); 
+        } else if ((int)set1.size() < THRESHOLD) {  //, maybe set to Probe_size
+            set1.push_back(x); 
+        } else {
+            // Re-adding elements during resize *must* succeed. 
+            // If they fail, it's a structural error, but we treat it as an implicit resize fail.
+            //release(x); 
+            // We can't actually trigger a resize here, so we must rely on the 
+            // re-insertion always succeeding, or handle failure. For now, let's 
+            // assume it fails only if all PROBE_SIZE is exceeded in both.
+            return false; // Should not happen if new size is adequate
+        }
+        
+        // No relocation is performed when re-adding during resize, only simple insertion.
+        //release(x);
+        return true;
+    }
 
     bool present(const T& x) const { //good
         int h0 = hash0(x);
@@ -162,7 +197,7 @@ private:
             // Check if y is still in iSet and remove it (Fig. 13.27, line 78)
             auto it = std::find(iSet.begin(), iSet.end(), y);
             if (it != iSet.end()) { 
-                iSet.erase(it); // Successful removal (line 78)
+                iSet.erase(it); // Successful removal (line 78), could replace with pop back but size is so small
                 
                 if ((int)jSet.size() < THRESHOLD) { // jSet is below threshold (line 79)
                     jSet.push_back(y); // Add to back of jSet
@@ -228,9 +263,9 @@ public:
         acquire(x);
         //std::cout << "\n=== add lock set ===\n";
         int h0 = hash0(x);
-        std::cout << "\n=== hash0 ===\n" << h0 << "\n-----------\n";
+        //std::cout << "\n=== hash0 ===\n" << h0 << "\n-----------\n";
         int h1 = hash1(x);
-        std::cout << "\n=== hash1 ===\n" << h1 << "\n-----------\n";
+        //std::cout << "\n=== hash1 ===\n" << h1 << "\n-----------\n";
         
         if (present(x)) {release(x); return false;}
         std::list<T>& set0 = table0[h0]; 
@@ -251,12 +286,12 @@ public:
         } // <-- resize_guard (Shared Lock on resize_mutex) is RELEASED here automatically
        // std::cout << "\n=== add lock released ===\n";
         if (mustResize) { 
-            std::cout << "\n=== hash1 ===\n" << "attempting to resize" << "\n-----------\n";
+            //std::cout << "\n=== hash1 ===\n" << "attempting to resize" << "\n-----------\n";
             resize(); 
             return add(x); // Recursive add(x)
         } else if (i != -1) { // If a relocation was triggered (i, h were set)
             if (!relocate(i, h)) { 
-                std::cout << "\n=== hash1 ===\n" << "attempting to resize" << "\n-----------\n";
+                //std::cout << "\n=== hash1 ===\n" << "attempting to resize" << "\n-----------\n";
                 resize(); 
                 return add(x); // Recursive add(x) for the element that failed relocation 
             }
@@ -398,7 +433,7 @@ public:
 // Benchmark Driver (Same as Baseline)
 // =========================
 int main() {
-    
+    /**
     int initial_size = 3;  // Use a small size for easy inspection
     int limit = 100;
     int num_threads = 1;    // Use 1 thread for initial testing
@@ -474,16 +509,16 @@ int main() {
     std::cout << "-------------------------------\n";
     std::cout << "Final size: " << set.size() << " (Expected: 2)\n";
     set.print(); // Use your diagnostic print function
+    */
 
-
-    /** 
+    ///** 
     int initial_size = 1000000;  // try smaller first for safety
     int limit = 100;
     int num_threads = 8;       // try 1, 2, 4, 8, etc.
     int total_ops = 1000000;
-    double insert_ratio = 0.30;
-    double remove_ratio = 0.30;
-    double contains_ratio = 0.40;
+    double insert_ratio = 0.10;
+    double remove_ratio = 0.10;
+    double contains_ratio = 0.80;
     int probe_size = 4;
     int threshold = 2;
 
@@ -525,6 +560,7 @@ int main() {
 
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end_time - start_time;
+    
 
     for (int c : computed_size)
         final_computed_size += c;
@@ -533,9 +569,9 @@ int main() {
     std::cout << "Expected final size: " << final_computed_size << "\n";
     std::cout << "Actual final size:   " << set.size() << "\n";
     std::cout << "Time taken:          " << duration.count() << " seconds\n";
-    */
+    //*/
     return 0;
 }
 
 // g++ -std=c++17 -O2 -pthread stripedCuckooHash.cpp -o striped_cuckoo_hash
-//striped_cuckoo_hash
+//./striped_cuckoo_hash
