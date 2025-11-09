@@ -71,9 +71,9 @@ private:
         //std::lock_guard<std::mutex> global_lock(global_resize_lock);
         // Wait for all adds/deletes to finish and block new ones
         //std::cout << "\n=== ===\n" << "resize called" << "\n-----------\n";
-        std::unique_lock<std::shared_mutex> resize_guard(resize_mutex);
+        ////////////////////std::unique_lock<std::shared_mutex> resize_guard(resize_mutex);
         // std::cout << "\n=== ===\n" << "made it past lock" << "\n-----------\n";
-        //for (auto& l : locks0) l.lock();
+        for (auto& l : locks0) l.lock();
         // dont need both for (auto& l : locks1) l.lock();
 
         //try {
@@ -104,7 +104,7 @@ private:
                 for (auto& x : row)
                     add_internal(x);
         //} catch (...) {
-        //for (auto& l : locks0) l.unlock();
+        for (auto& l : locks0) l.unlock();
           //  throw;
         //}
 
@@ -148,11 +148,15 @@ private:
         return true;
     }
 
-    bool present(const T& x) const { //good
+    bool present(const T& x) const{ //good
         int h0 = hash0(x);
         int h1 = hash1(x);
+        //locks0[h0].lock();
         for (auto& y : table0[h0]) if (y == x) return true;
+        //locks0[h0].unlock();
+        //locks1[h1].lock();
         for (auto& y : table1[h1]) if (y == x) return true;
+        //locks1[h1].unlock();
         return false;
     }
 
@@ -160,7 +164,7 @@ private:
         int hj = 0; // alternate table hash 
         int j = 1 - i; //alternate tables index
         { //resize scope
-        std::shared_lock<std::shared_mutex> resize_guard(resize_mutex);
+        ////////////std::shared_lock<std::shared_mutex> resize_guard(resize_mutex);
         for (int round = 0; round < LIMIT; round++) {
             std::list<T>& iSet = (i == 0 ? table0 : table1)[hi];
             
@@ -245,7 +249,7 @@ public:
     bool contains(const T& x) { //good
         // Block if a resize is in progress
         //std::cout << "\n=== in contains ===\n";
-        std::shared_lock<std::shared_mutex> resize_guard(resize_mutex);
+        /////////std::shared_lock<std::shared_mutex> resize_guard(resize_mutex);
         //std::cout << "\n=== not stuck at lock ===\n";
         acquire(x);  
         //std::cout << "\n=== good we here ===\n";
@@ -259,7 +263,7 @@ public:
         bool mustResize = false;
         int i = -1, h = -1; // row and column for relocation
         {// set scoped block so resize guard gives out
-        std::shared_lock<std::shared_mutex> resize_guard(resize_mutex);
+        /////////////std::shared_lock<std::shared_mutex> resize_guard(resize_mutex);
         acquire(x);
         //std::cout << "\n=== add lock set ===\n";
         int h0 = hash0(x);
@@ -331,7 +335,7 @@ public:
 
     bool remove(const T& x) {
         // Block if a resize is in progress
-        std::shared_lock<std::shared_mutex> resize_guard(resize_mutex);
+        ////////////////std::shared_lock<std::shared_mutex> resize_guard(resize_mutex);
         acquire(x); // line 16
 
         // C++ equivalent to Java's try/finally block
@@ -523,7 +527,7 @@ int main() {
     int threshold = 2;
 
     StripedCuckooHashSet<int> set(initial_size, limit, probe_size, threshold);
-    set.populate(initial_size / 2);
+    set.populate(initial_size/2); //initial_size / 2
 
     int ops_per_thread = total_ops / num_threads;
     int final_computed_size = set.size();
