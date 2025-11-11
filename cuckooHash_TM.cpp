@@ -16,6 +16,7 @@ private:
     int LIMIT; 
     int table_size;
     
+    
     // Member variables for the tables
     std::vector<std::optional<T>> table0;
     std::vector<std::optional<T>> table1;
@@ -46,10 +47,10 @@ private:
     }
 
     // Resize logic must be safe for use inside a transaction
-    void resize() __attribute__((transaction_safe)) {
+    void resize() __attribute__((transaction_safe)) { //__attribute__((transaction_safe))
         // The resize process must be atomic, ensured by the outer transaction block.
-        
         table_size = table_size * 2;
+        resize_cnt++;
 
         // Save old elements
         std::vector<std::optional<T>> temp0 = std::move(table0);
@@ -65,19 +66,66 @@ private:
         seed1 = dist(rng);
 
         // Reinsert all elements (recursive calls to add MUST be safe)
-        for (auto& i : temp0) {
+        for (auto& i : temp0) { //manually add 
             if (i.has_value()) {
-                add(*i);
+                T current_x = *i; // The item being inserted
+            
+                // Replicate the cuckoo displacement loop directly
+                for (int i = 0; i < LIMIT; i++) {
+                    // Try table 0
+                    auto new_x = swap(0, hash0(current_x), current_x);
+                    if (!(new_x.has_value())){
+                        current_x = T(); // Mark as successfully inserted
+                        goto next_temp0_element;
+                    }
+
+                    // Try table 1
+                    auto new_new_x = swap(1, hash1(*new_x), *new_x);
+                    if (!(new_new_x.has_value())) {
+                        current_x = T(); // Mark as successfully inserted
+                        goto next_temp0_element;
+                    }
+                    current_x = *new_new_x; // Continue with the displaced element
+                }
+                
+                // If fall through  loop,  re-insertion failed
+                // In  robust TM system it likely result in a transaction abort/retry
+                // Have TM system to handle the failure state if this occurs
+
+                next_temp0_element:;
             }
         }
         for (auto& i : temp1) {
             if (i.has_value()) {
-                add(*i);
+                T current_x = *i; // The item being inserted
+            
+                // Replicate the cuckoo displacement loop directly
+                for (int i = 0; i < LIMIT; i++) {
+                    // Try table 0
+                    auto new_x = swap(0, hash0(current_x), current_x);
+                    if (!(new_x.has_value())){
+                        current_x = T();
+                        goto next_temp1_element;
+                    }
+
+                    // Try table 1
+                    auto new_new_x = swap(1, hash1(*new_x), *new_x);
+                    if (!(new_new_x.has_value())) {
+                        current_x = T();
+                        goto next_temp1_element;
+                    }
+                    current_x = *new_new_x; // Continue with the displaced element
+                }
+                
+                // If we fall through the loop, the re-insertion failed.
+
+                next_temp1_element:;
             }
         }
     }
 
 public:
+    int resize_cnt = 0;
     CuckooHashSet(int size, int limit) 
     : table_size(size), LIMIT(limit), table0(size), table1(size), 
       rng(std::mt19937(std::random_device{}())) {
@@ -86,6 +134,7 @@ public:
         seed1 = dist(rng);
     }
 
+    int getResize() {return resize_cnt;}
     // --- Core Operations wrapped in __transaction_atomic ---
 
     bool contains(const T& x) const {
@@ -98,64 +147,64 @@ public:
         return result;
     }
 
-    // This function must be marked transaction_safe because it is called recursively in resize
-    bool add(const T& x) __attribute__((transaction_safe)) {
-        bool result = false; // Initialize result outside the loop/transaction
-        
-        __transaction_atomic {
-            T loop_x; // Declare loop_x outside the potential break/goto points
-
-            do { // Use do-while(false) structure to allow 'break' instead of 'goto'
-                if (contains(x)) {
-                    result = false;
-                    break; 
-                }
-                
-                loop_x = x; // Initialization moved inside the do-block
-
-                for (int i = 0; i < LIMIT; i++) {
-                    auto new_x = swap(0, hash0(loop_x), loop_x);
-                    if (!(new_x.has_value())){
-                        result = true;
-                        goto exit_loop; // Safely jump out of the inner loop
-                    }
-                    auto new_new_x = swap(1, hash1(*new_x), *new_x);
-                    if (!(new_new_x.has_value())) {
-                        result = true;
-                        goto exit_loop; // Safely jump out of the inner loop
-                    }
-                    loop_x = *new_new_x;
-                }
-                
-                // Too many displacements — resize and try again
-                resize();
-                result = add(loop_x); // Recursive add call (safe)
-                
-            exit_loop:; // Label used for exiting the inner 'for' loop
-            } while (false); // End of do-while block acting as a transaction body
+    bool add(const T& x) __attribute__((transaction_safe)){
+        bool result;
+       // bool needs_resize = false;
+        __transaction_atomic{
+        T loop_x = x;
+        if (contains(x)) {
+            //T loop_x = x;
+            result = false;
+            goto end_transaction;
         }
+        //T ret_x = x;
+        //T loop_x = x;
+        for (int i = 0; i < LIMIT; i++) {
+            auto new_x = swap(0, hash0(loop_x), loop_x);
+            if (!(new_x.has_value())){
+                result = true;
+                goto end_transaction;
+            }
+            auto new_new_x = swap(1, hash1(*new_x), *new_x);
+            if (!(new_new_x.has_value())) {
+                result = true;
+                goto end_transaction;
+            }
+            loop_x = *new_new_x;
+            //ret_x = *new_new_x;
+        }
+        // Too many displacements — resize and try again
+        //std::cout << ret_x << std::endl;
+        //print();
+        //needs_resize = true;
+        resize();
+        result = add(loop_x); // Recursive add call (safe)
+        end_transaction:; // Label for goto
+    }
+        //std::cout << "\n\n" << needs_resize << "\n\n" << std::endl;
         return result;
     }
 
-    bool remove(const T& x) {
+    bool remove(const T& x) __attribute__((transaction_safe)){
+        ///if (!contains(x)){
+        //    return false;
+        //}
         bool result;
         __transaction_atomic {
-            int h0 = hash0(x);
-            int h1 = hash1(x);
-
-            do { // Use do-while(false) structure to allow 'break'
-                if (table0[h0] && *table0[h0] == x) {
-                    table0[h0].reset();
-                    result = true;
-                    break;
-                }
-                if (table1[h1] && *table1[h1] == x) {
-                    table1[h1].reset();
-                    result = true;
-                    break;
-                }
-                result = false;
-            } while (false);
+        int h0 = hash0(x);
+        int h1 = hash1(x);
+        if (table0[h0] && *table0[h0] == x) {
+            table0[h0].reset();
+            result = true;
+            goto end_transaction;
+        }
+        if (table1[h1] && *table1[h1] == x) {
+            table1[h1].reset();
+            result = true;
+            goto end_transaction;
+        }
+            result = false;
+        end_transaction:;
         }
         return result;
     }
@@ -205,16 +254,16 @@ public:
 
 // Example usage:
 int main() {
-    int initial_size = 1000000;
+    int initial_size = 55000;
     int limit = 100;
-    int num_threads = 8; 
+    int num_threads = 16; 
     int total_ops = 1000000;
     double insert_ratio = 0.30;
     double remove_ratio = 0.30;
     double contains_ratio = 0.40;
 
     CuckooHashSet<int> set(initial_size, limit);
-    set.populate(initial_size / 2); 
+    set.populate(initial_size*0.9); 
     
     int ops_per_thread = total_ops / num_threads;
     int final_computed_size = set.size();
@@ -261,6 +310,7 @@ int main() {
     std::cout << "Expected final size: " << final_computed_size << "\n";
     std::cout << "Actual final size:   " << set.size() << "\n";
     std::cout << "Time taken:          " << duration.count() << " seconds\n";
+    std::cout << "resize count:          " << set.getResize() << " resizes\n";
 
     return 0;
 }

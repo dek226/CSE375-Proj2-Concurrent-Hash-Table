@@ -52,7 +52,7 @@ private:
     // Rehash all elements into a new table with larger size
     void resize() {
         //if (table_size > 1'000'000) { // safety limit warning since reached this
-          //  std::cerr << "Resize limit reached (" << table_size << "). Stopping further resizes.\n";
+        std::cerr << "Resize\n";
             //return;
         //}
         //int temp_size = table_size;
@@ -190,12 +190,12 @@ int main() {
     int limit = 100;             // displacement limit, //Common practical values for the maximum path length threshold are typically in the range of 100 to 200 displacements (kicks). 
     int num_threads = 1;         // can test 1, 2, 4, 8, etc.
     int total_ops = 1000000;   // total number of operations, shoudl do 1,000,000
-    double insert_ratio = 0.30;  // 10% insert
-    double remove_ratio = 0.30;  // 10% remove
-    double contains_ratio = 0.40;// 80% contains
+    double insert_ratio = 0.10;  // 10% insert
+    double remove_ratio = 0.10;  // 10% remove
+    double contains_ratio = 0.80;// 80% contains
 
     CuckooHashSet<int> set(initial_size, limit);
-    set.populate(initial_size / 2); // pre-populate 50% of table
+    set.populate(initial_size * 0.5); // pre-populate 50% of table
     
      // Each thread performs total_ops / num_threads
     int ops_per_thread = total_ops / num_threads;
